@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard SCADA & Analítica - UNDAC</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f8fafc; }
+        ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+        
+        .scada-container { display: flex; justify-content: space-around; align-items: flex-end; height: 150px; padding-bottom: 20px; position: relative; }
+        .scada-tank { width: 55px; height: 100px; border: 2px solid #64748b; border-top: none; background: #fff; position: relative; border-radius: 0 0 4px 4px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); margin: 0 auto; }
+        .scada-liquid { position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(180deg, #3b82f6 0%, #1e3a8a 100%); transition: height 0.1s linear; }
+        .scada-pipe { background: #94a3b8; height: 4px; position: absolute; bottom: 10px; z-index: 0; }
+        .scada-pump { width: 24px; height: 24px; border-radius: 50%; background: #f8fafc; border: 2px solid #475569; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: bold; position: absolute; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        .scada-sp { position: absolute; left: -2px; right: -2px; border-top: 2px dashed #ef4444; z-index: 10; transition: bottom 0.1s; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans h-screen flex flex-col overflow-hidden">
+
+    <!-- HEADER Y PESTAÑAS FIJAS -->
+    <header class="bg-white border-b border-slate-200 flex flex-col shadow-sm shrink-0 z-20">
+        <div class="flex justify-between items-center px-6 py-3">
+            <div>
+                <h1 class="text-lg font-bold text-slate-800">Control de Nivel PI + Feedforward (Reglas SIMC) — Banco de Flotación</h1>
+                <p class="text-[11px] text-slate-500">Basado en Quintanilla et al. (2023) • Proceso Integrador en Serie con Bombas Peristálticas</p>
+            </div>
+            <div class="flex gap-2">
+                <button id="btnPausa" class="bg-amber-500 hover:bg-amber-600 text-white px-4 py-1.5 rounded text-sm font-bold shadow transition">Pausar Simulación</button>
+                <a href="/descargar" class="bg-slate-800 hover:bg-slate-900 text-white px-4 py-1.5 rounded text-sm font-bold shadow transition">Descargar Python</a>
+            </div>
+        </div>
+        
+        <div class="flex gap-1 px-6">
+            <button onclick="switchTab('tab1')" id="btnTab1" class="px-5 py-2 bg-blue-600 text-white font-bold rounded-t-md shadow-sm text-sm border-t border-l border-r border-blue-600 transition">1. Simulación Interactiva del Proceso</button>
+            <button onclick="switchTab('tab2')" id="btnTab2" class="px-5 py-2 bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold rounded-t-md text-sm border-t border-l border-r border-slate-200 transition">2. Modelo Matemático y Sintonización</button>
+            <button onclick="switchTab('tab3')" id="btnTab3" class="px-5 py-2 bg-slate-100 text-slate-600 hover:bg-slate-200 font-semibold rounded-t-md text-sm border-t border-l border-r border-slate-200 transition">3. Lógica Ladder PLC y Calibración</button>
+        </div>
+    </header>
+
+    <!-- CONTENEDOR PRINCIPAL -->
+    <div class="flex-1 relative overflow-hidden">
+        
+        <!-- ============================================== -->
+        <!-- PESTAÑA 1: SIMULACIÓN INTERACTIVA (SCADA)      -->
+        <!-- ============================================== -->
+        <div id="tab1" class="absolute inset-0 flex p-4 gap-4" style="display: flex;">
+            <!-- PANEL IZQUIERDO (45% ancho) -->
+            <aside class="w-[45%] flex flex-col gap-3 overflow-y-auto pr-2 pb-4">
+                
+                <!-- SCADA -->
+                <div class="bg-white border border-slate-200 rounded-lg p-3 shadow-sm relative shrink-0">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wide">Esquema SCADA (Lazo Feedforward)</h3>
+                        <button id="btnPerturbar" class="bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 text-[10px] font-bold py-1 px-2 rounded transition">⚡ Inyectar Disturbio (Q_in)</button>
+                    </div>
+                    
+                    <div class="scada-container bg-slate-50 border border-slate-100 rounded mt-4">
+                        <div class="text-center relative z-10 w-1/3">
+                            <span class="text-[10px] font-bold text-slate-600 absolute -top-5 w-full">C-1</span>
+                            <div class="scada-tank"><div id="liq1" class="scada-liquid" style="height: 50%;"></div><div id="sp1_line" class="scada-sp"></div></div>
+                            <span id="txtH1" class="text-[10px] font-mono font-bold text-slate-800 absolute -bottom-5 w-full">0.0</span>
+                        </div>
+                        <div class="scada-pipe" style="width: 15%; left: 18%;"></div>
+                        <div class="scada-pump" style="left: 24%; bottom: 21px;">P-1</div>
+
+                        <div class="text-center relative z-10 w-1/3 mt-6">
+                            <span class="text-[10px] font-bold text-slate-600 absolute -top-5 w-full">C-2</span>
+                            <div class="scada-tank"><div id="liq2" class="scada-liquid" style="height: 50%;"></div><div id="sp2_line" class="scada-sp"></div></div>
+                            <span id="txtH2" class="text-[10px] font-mono font-bold text-slate-800 absolute -bottom-5 w-full">0.0</span>
+                        </div>
+                        <div class="scada-pipe" style="width: 15%; left: 51%;"></div>
+                        <div class="scada-pump" style="left: 57%; bottom: 21px;">P-2</div>
+
+                        <div class="text-center relative z-10 w-1/3 mt-12">
+                            <span class="text-[10px] font-bold text-slate-600 absolute -top-5 w-full">C-3</span>
+                            <div class="scada-tank"><div id="liq3" class="scada-liquid" style="height: 50%;"></div><div id="sp3_line" class="scada-sp"></div></div>
+                            <span id="txtH3" class="text-[10px] font-mono font-bold text-slate-800 absolute -bottom-5 w-full">0.0</span>
+                        </div>
+                        <div class="scada-pipe" style="width: 10%; right: 10%;"></div>
+                        <div class="scada-pump" style="right: 8%; bottom: 21px;">P-3</div>
+                    </div>
+                </div>
+
+                <!-- CONTROLES -->
+                <div class="bg-white border border-slate-200 rounded-lg p-3 shadow-sm shrink-0">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wide">Parámetros del Controlador</h3>
+                        <div class="flex gap-2">
+                            <button id="btnRestablecer" class="text-[9px] bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 font-bold py-1 px-2 rounded transition">↺ Restablecer Valores</button>
+                            <div class="flex items-center gap-1">
+                                <input type="checkbox" id="chkRuido" checked class="w-3 h-3 accent-blue-600">
+                                <label class="text-[10px] font-semibold text-slate-500">Ruido Sensor</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3 pb-3 border-b border-slate-100">
+                        <label class="text-xs font-semibold text-slate-700 flex justify-between">Q_feed Base: <span id="v_qfeed" class="text-blue-600 font-bold">45.0 lpm</span></label>
+                        <input type="range" id="inpQfeed" min="0" max="100" value="45" class="w-full h-1 mt-2">
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2">
+                        <div class="bg-slate-50 p-2 rounded">
+                            <h4 class="text-[10px] font-bold text-center mb-2 text-slate-700">Celda 1</h4>
+                            <label class="text-[9px] text-slate-500 flex justify-between">SP: <span id="v_sp1">30</span></label><input type="range" id="sp1" min="20" max="40" value="30" class="w-full h-1 mb-2">
+                            <label class="text-[9px] text-slate-500 flex justify-between">Kc: <span id="v_kc1">-62</span></label><input type="range" id="kc1" min="-100" max="0" value="-62" class="w-full h-1 mb-2">
+                            <label class="text-[9px] text-slate-500 flex justify-between">Kff: <span id="v_kff1">0.8</span></label><input type="range" id="kff1" min="0" max="2" step="0.1" value="0.8" class="w-full h-1">
+                        </div>
+                        <div class="bg-slate-50 p-2 rounded">
+                            <h4 class="text-[10px] font-bold text-center mb-2 text-slate-700">Celda 2</h4>
+                            <label class="text-[9px] text-slate-500 flex justify-between">SP: <span id="v_sp2">34</span></label><input type="range" id="sp2" min="20" max="40" value="34" class="w-full h-1 mb-2">
+                            <label class="text-[9px] text-slate-500 flex justify-between">Kc: <span id="v_kc2">-76</span></label><input type="range" id="kc2" min="-100" max="0" value="-76" class="w-full h-1 mb-2">
+                            <label class="text-[9px] text-slate-500 flex justify-between">Kff: <span id="v_kff2">0.8</span></label><input type="range" id="kff2" min="0" max="2" step="0.1" value="0.8" class="w-full h-1">
+                        </div>
+                        <div class="bg-slate-50 p-2 rounded">
+                            <h4 class="text-[10px] font-bold text-center mb-2 text-slate-700">Celda 3</h4>
+                            <label class="text-[9px] text-slate-500 flex justify-between">SP: <span id="v_sp3">32</span></label><input type="range" id="sp3" min="20" max="40" value="32" class="w-full h-1 mb-2">
+                            <label class="text-[9px] text-slate-500 flex justify-between">Kc: <span id="v_kc3">-85</span></label><input type="range" id="kc3" min="-100" max="0" value="-85" class="w-full h-1 mb-2">
+                            <label class="text-[9px] text-slate-500 flex justify-between">Kff: <span id="v_kff3">1.0</span></label><input type="range" id="kff3" min="0" max="2" step="0.1" value="1.0" class="w-full h-1">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TABLA IAE -->
+                <div class="bg-white border border-slate-200 rounded-lg p-3 shadow-sm shrink-0 mb-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wide">Indicadores SCADA</h3>
+                        <button id="btnReiniciar" class="text-[9px] text-slate-400 hover:text-slate-600 underline">Reiniciar IAE</button>
+                    </div>
+                    <table class="w-full text-[10px] text-center">
+                        <thead class="bg-slate-800 text-white">
+                            <tr><th class="p-1">Unidad</th><th class="p-1">h(t)</th><th class="p-1">u(t)</th><th class="p-1 border-r border-slate-600">PLC 16-bit</th><th class="p-1 text-slate-300">IAE (FB)</th><th class="p-1 text-sky-300">IAE (FF)</th></tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                            <tr><td class="p-1 font-bold text-slate-700">C-1</td><td class="p-1 font-mono" id="tb_h1">0.0</td><td class="p-1 font-mono text-blue-600" id="tb_q1">0.0</td><td class="p-1 font-mono bg-slate-50 text-slate-500 border-r" id="tb_plc1">0</td><td class="p-1 font-mono text-slate-400" id="tb_iae1_fb">0.0</td><td class="p-1 font-mono font-bold text-blue-600" id="tb_iae1_ff">0.0</td></tr>
+                            <tr><td class="p-1 font-bold text-slate-700">C-2</td><td class="p-1 font-mono" id="tb_h2">0.0</td><td class="p-1 font-mono text-blue-600" id="tb_q2">0.0</td><td class="p-1 font-mono bg-slate-50 text-slate-500 border-r" id="tb_plc2">0</td><td class="p-1 font-mono text-slate-400" id="tb_iae2_fb">0.0</td><td class="p-1 font-mono font-bold text-blue-600" id="tb_iae2_ff">0.0</td></tr>
+                            <tr><td class="p-1 font-bold text-slate-700">C-3</td><td class="p-1 font-mono" id="tb_h3">0.0</td><td class="p-1 font-mono text-blue-600" id="tb_q3">0.0</td><td class="p-1 font-mono bg-slate-50 text-slate-500 border-r" id="tb_plc3">0</td><td class="p-1 font-mono text-slate-400" id="tb_iae3_fb">0.0</td><td class="p-1 font-mono font-bold text-blue-600" id="tb_iae3_ff">0.0</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+            </aside>
+
+            <!-- PANEL DERECHO (55% ancho - GRÁFICOS) -->
+            <main class="w-[55%] flex flex-col gap-3 overflow-y-auto pb-4">
+                
+                <div class="flex justify-between items-center bg-white border border-slate-200 px-3 py-2 rounded shadow-sm shrink-0">
+                    <h2 class="text-xs font-bold text-slate-700 uppercase">Respuesta Temporal vs Consigna</h2>
+                    <div class="flex gap-3 text-[9px] font-bold">
+                        <div class="flex items-center gap-1"><div class="w-3 h-1 bg-slate-300"></div> Nivel (FB)</div>
+                        <div class="flex items-center gap-1"><div class="w-3 h-1 bg-blue-600"></div> Nivel (FF)</div>
+                        <div class="flex items-center gap-1"><div class="w-3 h-0 border-t border-red-500 border-dashed"></div> Setpoint</div>
+                    </div>
+                </div>
+
+                <div class="bg-white border border-slate-200 rounded p-2 shadow-sm flex-1 min-h-[120px] relative"><canvas id="ch_h1"></canvas></div>
+                <div class="bg-white border border-slate-200 rounded p-2 shadow-sm flex-1 min-h-[120px] relative"><canvas id="ch_h2"></canvas></div>
+                <div class="bg-white border border-slate-200 rounded p-2 shadow-sm flex-1 min-h-[120px] relative"><canvas id="ch_h3"></canvas></div>
+
+                <div class="bg-white border border-slate-200 rounded p-2 shadow-sm flex-1 min-h-[150px] relative mt-1 flex flex-col">
+                    <h2 class="text-[10px] font-bold text-slate-700 uppercase mb-1 ml-2">Caudal Manipulado Bombas u_i(t)</h2>
+                    <div class="flex-1 relative"><canvas id="ch_q"></canvas></div>
+                </div>
+
+            </main>
+        </div>
+
+        <!-- ============================================== -->
+        <!-- PESTAÑA 2: MODELO MATEMÁTICO (MathJax)         -->
+        <!-- ============================================== -->
+        <div id="tab2" class="absolute inset-0 overflow-y-auto p-6 bg-slate-50" style="display: none;">
+            <div class="max-w-4xl mx-auto space-y-6">
+                
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+                    <h2 class="text-lg font-bold text-slate-800 border-b pb-2 mb-4">1. Función de Transferencia (Proceso Integrador)</h2>
+                    <p class="text-sm text-slate-600 mb-4">
+                        El control de nivel mediante bombas peristálticas se modela como un proceso integrador de primer orden con tiempo muerto. A diferencia de las válvulas de control (procesos autorregulados), el tanque no alcanza el estado estacionario sin intervención del controlador.
+                    </p>
+                    <div class="bg-slate-50 p-4 rounded border border-slate-100 text-center overflow-x-auto">
+                        $$ G_p(s) = \frac{Y(s)}{U(s)} = \frac{k}{\tau_1 s + 1} e^{-\theta s} $$
+                    </div>
+                    <ul class="text-xs text-slate-500 mt-4 space-y-1 list-disc pl-5">
+                        <li><strong>\( k \):</strong> Ganancia del proceso (calculada mediante \(\Delta y / (\Delta t \cdot \Delta u)\)).</li>
+                        <li><strong>\( \theta \):</strong> Tiempo de retardo (\(t\) hasta que el nivel responde al cambio de la bomba).</li>
+                        <li><strong>\( \tau_1 \):</strong> Constante de tiempo del proceso integrador.</li>
+                    </ul>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+                    <h2 class="text-lg font-bold text-slate-800 border-b pb-2 mb-4">2. Ecuación de Control Híbrido (Feedback + Feedforward)</h2>
+                    <p class="text-sm text-slate-600 mb-4">
+                        Para contrarrestar los disturbios encadenados (\(\Delta Q_d\)) en el banco de flotación, se implementa un algoritmo PI estándar apoyado por un elemento Feedforward pre-alimentado, donde el caudal de entrada actúa como perturbación medible.
+                    </p>
+                    <div class="bg-slate-50 p-4 rounded border border-slate-100 text-center overflow-x-auto">
+                        $$ u_i(t) = K_{c_i} \left( e_i(t) + \frac{1}{\tau_{i}} \int_{0}^{t} e_i(\tau)d\tau \right) + K_{ff_i} \Delta Q_{d_i} $$
+                    </div>
+                    <div class="text-center text-xs text-slate-500 mt-2">
+                        $$ \text{Donde } \Delta Q_{d_i} = Q_{d_i}(t) - Q_{d_i}(t-1) \text{ para } i = 1,2,3. $$
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+                    <h2 class="text-lg font-bold text-slate-800 border-b pb-2 mb-4">3. Reglas de Sintonización SIMC</h2>
+                    <p class="text-sm text-slate-600 mb-4">
+                        La calibración del controlador Proporcional-Integral se rigió por las reglas SIMC <i>(Simple Internal Model Control)</i> para procesos integradores puros, garantizando que el sistema sea inmune a oscilaciones lentas y rechace las perturbaciones.
+                    </p>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-slate-50 p-4 rounded border border-slate-100 text-center overflow-x-auto">
+                            $$ K_c = \frac{1}{k'} \frac{1}{\tau_c + \theta} $$
+                        </div>
+                        <div class="bg-slate-50 p-4 rounded border border-slate-100 text-center overflow-x-auto">
+                            $$ \tau_i = \min\{\tau_1, 4(\tau_c + \theta)\} $$
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- ============================================== -->
+        <!-- PESTAÑA 3: PLC Y LÓGICA LADDER                 -->
+        <!-- ============================================== -->
+        <div id="tab3" class="absolute inset-0 overflow-y-auto p-6 bg-slate-50" style="display: none;">
+            <div class="max-w-4xl mx-auto space-y-6">
+                
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+                    <h2 class="text-lg font-bold text-slate-800 border-b pb-2 mb-4">1. Arquitectura de Control PLC (General Electric)</h2>
+                    <div class="flex items-start gap-4">
+                        <div class="w-1/3 text-sm text-slate-600">
+                            <p class="mb-2">El control físico de las bombas y lectura de nivel óptico se llevó a cabo utilizando un sistema PLC conectado mediante GEHCS I/O Server a MATLAB.</p>
+                            <ul class="list-disc pl-4 space-y-1 text-xs">
+                                <li><strong>Software:</strong> Proficy Machine Edition 7.0</li>
+                                <li><strong>Módulo Sensores (Input):</strong> IC693ALG223 (Direcciones AI00X)</li>
+                                <li><strong>Módulo Actuadores (Output):</strong> IC693ALG392 (Direcciones AQ00X)</li>
+                            </ul>
+                        </div>
+                        <div class="w-2/3 bg-slate-900 p-4 rounded text-emerald-400 font-mono text-xs overflow-x-auto shadow-inner">
+                            // Flujo de Comunicación DDE (Dynamic Data Exchange)<br>
+                            channel = ddeinit('GEHCS', 'PLC');<br><br>
+                            // Lectura de Sensores Ópticos (Nivel)<br>
+                            bits_sensor = ddereq(channel, 'AI001');<br><br>
+                            // Escritura en Bombas Peristálticas<br>
+                            ddepoke(channel, 'AQ001', bits_actuador);
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+                    <h2 class="text-lg font-bold text-slate-800 border-b pb-2 mb-4">2. Programación Ladder y Cuantización a 16-bit</h2>
+                    <p class="text-sm text-slate-600 mb-4">
+                        Las señales en los canales (terminals) operan en lazos de corriente estándar de <strong>4-20 mA</strong>, convertidos digitalmente a datos tipo <code>INT</code> (Entero de 16-bit). En la lógica Ladder, se utilizaron bloques <code>MOVE_INT</code> para vincular los registros lógicos con las salidas físicas.
+                    </p>
+                    <div class="flex gap-4">
+                        <div class="bg-blue-50 border border-blue-200 rounded p-4 flex-1 text-center">
+                            <div class="text-[10px] font-bold text-blue-800 uppercase">Límite Inferior (0 lpm)</div>
+                            <div class="text-2xl font-mono text-blue-600 font-bold my-2">0 bits</div>
+                            <div class="text-xs text-blue-700">Equivale a 4 mA</div>
+                        </div>
+                        <div class="flex items-center text-slate-300">
+                            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                        </div>
+                        <div class="bg-slate-50 border border-slate-200 rounded p-4 flex-1 text-center">
+                            <div class="text-[10px] font-bold text-slate-800 uppercase">Límite Superior (Máx Bombas)</div>
+                            <div class="text-2xl font-mono text-slate-700 font-bold my-2">32,767 bits</div>
+                            <div class="text-xs text-slate-500">Equivale a 20 mA</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+                    <h2 class="text-lg font-bold text-slate-800 border-b pb-2 mb-4">3. Calibración de Actuadores (Bombas Masterflex)</h2>
+                    <p class="text-sm text-slate-600 mb-4">
+                        Las curvas de calibración para la bomba de alimentación demuestran una respuesta estrictamente lineal entre la señal eléctrica recibida del PLC y el caudal volumétrico evacuado por las bombas.
+                    </p>
+                    <div class="bg-slate-50 p-4 border border-slate-100 rounded text-center">
+                        <span class="font-mono font-bold text-slate-700">Q_{feed} [lpm] = 0.0035 × (Señal 16-bit)</span>
+                        <p class="text-[10px] text-slate-400 mt-2">Relación matemática aplicada en el SCADA (aprox. 28,571 bits = 100 lpm)</p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- NAVEGACIÓN DE PESTAÑAS ---
+        function switchTab(tabId) {
+            ['tab1', 'tab2', 'tab3'].forEach(id => {
+                document.getElementById(id).style.display = 'none';
+                let btn = document.getElementById('btn' + id.charAt(0).toUpperCase() + id.slice(1));
+                btn.classList.remove('bg-blue-600', 'text-white');
+                btn.classList.add('bg-slate-100', 'text-slate-600');
+            });
+            
+            document.getElementById(tabId).style.display = 'flex';
+            let activeBtn = document.getElementById('btn' + tabId.charAt(0).toUpperCase() + tabId.slice(1));
+            activeBtn.classList.remove('bg-slate-100', 'text-slate-600');
+            activeBtn.classList.add('bg-blue-600', 'text-white');
+        }
+
+        // --- MOTOR MATEMÁTICO ---
+        const AREA = 900.0; const CONV = 1000.0 / 60.0;
+        let Q_feed = 45.0; 
+
+        class Celda {
+            constructor(h_init) { this.h = h_init; this.int_err = 0; this.Q_in_prev = null; this.iae = 0; this.Q_out = 0; }
+            actualizar(sp, Kc, ti, Kff, Q_in, dt, ruido) {
+                let h_medido = this.h + (ruido ? (Math.random() - 0.5) * 0.3 : 0);
+                let e = sp - h_medido;
+                this.int_err += e * dt; this.iae += Math.abs(e) * dt;
+                
+                let u_fb = Kc * (e + (1.0 / ti) * this.int_err);
+                let dQin = (this.Q_in_prev !== null) ? (Q_in - this.Q_in_prev) : 0;
+                let u_ff = Kff * dQin;
+                this.Q_in_prev = Q_in;
+
+                this.Q_out = Math.max(0, Math.min(100, u_fb + u_ff));
+                this.h += (((Q_in * CONV) - (this.Q_out * CONV)) / AREA) * dt;
+                return { out: this.Q_out, h: h_medido };
+            }
+        }
+
+        let fbo = [new Celda(29), new Celda(34.5), new Celda(33.5)]; // Feedback Only
+        let fff = [new Celda(29), new Celda(34.5), new Celda(33.5)]; // Feedforward
+        let tau_i = [56, 30, 44]; 
+
+        // --- GRÁFICOS ---
+        Chart.defaults.font.size = 10;
+        Chart.defaults.elements.point.radius = 0;
+        const MAX_PTS = 120;
+
+        function crearChartNivel(id, titulo) {
+            return new Chart(document.getElementById(id).getContext('2d'), {
+                type: 'line',
+                data: { labels: [], datasets: [
+                    { data: [], borderColor: '#cbd5e1', borderWidth: 2, borderDash: [4,4] }, 
+                    { data: [], borderColor: '#2563eb', borderWidth: 2 }, 
+                    { data: [], borderColor: '#ef4444', borderWidth: 1.5, borderDash: [3,3] } 
+                ]},
+                options: {
+                    responsive: true, maintainAspectRatio: false, animation: false,
+                    plugins: { legend: { display: false }, title: { display: true, text: titulo, align: 'start', padding: {top:2, bottom:2} } },
+                    scales: { x: { display: false }, y: { min: 20, max: 40, position: 'right', grid: {color: '#f8fafc'} } }
+                }
+            });
+        }
+
+        let chH1 = crearChartNivel('ch_h1', 'Celda 1 (Rougher) [cm]');
+        let chH2 = crearChartNivel('ch_h2', 'Celda 2 (Scavenger) [cm]');
+        let chH3 = crearChartNivel('ch_h3', 'Celda 3 (Cleaner) [cm]');
+
+        let chQ = new Chart(document.getElementById('ch_q').getContext('2d'), {
+            type: 'line',
+            data: { labels: [], datasets: [
+                { label: 'P-1 (C1)', data: [], borderColor: '#1e3a8a', borderWidth: 1.5 },
+                { label: 'P-2 (C2)', data: [], borderColor: '#3b82f6', borderWidth: 1.5 },
+                { label: 'P-3 (C3)', data: [], borderColor: '#94a3b8', borderWidth: 1.5 }
+            ]},
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                plugins: { legend: { position: 'top', align: 'end', labels: {boxWidth: 12} } },
+                scales: { x: { display: false }, y: { min: 0, max: 100, position: 'right' } }
+            }
+        });
+
+        // --- BUCLE PRINCIPAL ---
+        let running = true; let t = 0;
+
+        setInterval(() => {
+            if(!running) return;
+
+            let ruido = document.getElementById('chkRuido').checked;
+            let sp = [parseFloat(document.getElementById('sp1').value), parseFloat(document.getElementById('sp2').value), parseFloat(document.getElementById('sp3').value)];
+            let kc = [parseFloat(document.getElementById('kc1').value), parseFloat(document.getElementById('kc2').value), parseFloat(document.getElementById('kc3').value)];
+            let kff = [parseFloat(document.getElementById('kff1').value), parseFloat(document.getElementById('kff2').value), parseFloat(document.getElementById('kff3').value)];
+
+            for(let i=1; i<=3; i++) {
+                document.getElementById('v_sp'+i).innerText = sp[i-1];
+                document.getElementById('v_kc'+i).innerText = kc[i-1];
+                document.getElementById('v_kff'+i).innerText = kff[i-1];
+            }
+
+            let r1_fb = fbo[0].actualizar(sp[0], kc[0], tau_i[0], 0, Q_feed, 1, ruido);
+            let r2_fb = fbo[1].actualizar(sp[1], kc[1], tau_i[1], 0, r1_fb.out, 1, ruido);
+            let r3_fb = fbo[2].actualizar(sp[2], kc[2], tau_i[2], 0, r2_fb.out, 1, ruido);
+
+            let r1_ff = fff[0].actualizar(sp[0], kc[0], tau_i[0], kff[0], Q_feed, 1, ruido);
+            let r2_ff = fff[1].actualizar(sp[1], kc[1], tau_i[1], kff[1], r1_ff.out, 1, ruido);
+            let r3_ff = fff[2].actualizar(sp[2], kc[2], tau_i[2], kff[2], r2_ff.out, 1, ruido);
+
+            let lbl = t + 's';
+            let pushChart = (chart, h_fb, h_ff, setp) => {
+                chart.data.labels.push(lbl); chart.data.datasets[0].data.push(h_fb); chart.data.datasets[1].data.push(h_ff); chart.data.datasets[2].data.push(setp);
+                if(chart.data.labels.length > MAX_PTS) { chart.data.labels.shift(); chart.data.datasets.forEach(d => d.data.shift()); }
+                chart.update();
+            };
+
+            pushChart(chH1, r1_fb.h, r1_ff.h, sp[0]);
+            pushChart(chH2, r2_fb.h, r2_ff.h, sp[1]);
+            pushChart(chH3, r3_fb.h, r3_ff.h, sp[2]);
+
+            chQ.data.labels.push(lbl);
+            chQ.data.datasets[0].data.push(r1_ff.out); chQ.data.datasets[1].data.push(r2_ff.out); chQ.data.datasets[2].data.push(r3_ff.out);
+            if(chQ.data.labels.length > MAX_PTS) { chQ.data.labels.shift(); chQ.data.datasets.forEach(d => d.data.shift()); }
+            chQ.update();
+
+            let actTanque = (idLiq, idSp, idTxt, h, sp_val) => {
+                document.getElementById(idLiq).style.height = Math.min(100, Math.max(0, (h/45)*100)) + '%';
+                document.getElementById(idSp).style.bottom = Math.min(100, Math.max(0, (sp_val/45)*100)) + '%';
+                document.getElementById(idTxt).innerText = h.toFixed(1) + ' cm';
+            };
+            actTanque('liq1', 'sp1_line', 'txtH1', r1_ff.h, sp[0]);
+            actTanque('liq2', 'sp2_line', 'txtH2', r2_ff.h, sp[1]);
+            actTanque('liq3', 'sp3_line', 'txtH3', r3_ff.h, sp[2]);
+
+            const fPLC = 28571 / 100.0; 
+            let actFila = (n, h, q, iae_fb, iae_ff) => {
+                document.getElementById('tb_h'+n).innerText = h.toFixed(2); document.getElementById('tb_q'+n).innerText = q.toFixed(1);
+                document.getElementById('tb_plc'+n).innerText = Math.round(q * fPLC);
+                document.getElementById('tb_iae'+n+'_fb').innerText = iae_fb.toFixed(1); document.getElementById('tb_iae'+n+'_ff').innerText = iae_ff.toFixed(1);
+            };
+            actFila(1, r1_ff.h, r1_ff.out, fbo[0].iae, fff[0].iae);
+            actFila(2, r2_ff.h, r2_ff.out, fbo[1].iae, fff[1].iae);
+            actFila(3, r3_ff.h, r3_ff.out, fbo[2].iae, fff[2].iae);
+
+            t++;
+        }, 150);
+
+        // --- EVENTOS UI ---
+        document.getElementById('inpQfeed').oninput = e => { Q_feed = parseFloat(e.target.value); document.getElementById('v_qfeed').innerText = Q_feed.toFixed(1) + ' lpm'; };
+        
+        document.getElementById('btnPerturbar').onclick = () => {
+            document.getElementById('inpQfeed').value = 80; Q_feed = 80.0; document.getElementById('v_qfeed').innerText = '80.0 lpm';
+            setTimeout(() => { document.getElementById('inpQfeed').value = 45; Q_feed = 45.0; document.getElementById('v_qfeed').innerText = '45.0 lpm'; }, 4000);
+        };
+        
+        document.getElementById('btnReiniciar').onclick = () => { fbo.forEach(c => c.iae = 0); fff.forEach(c => c.iae = 0); };
+        
+        document.getElementById('btnPausa').onclick = e => {
+            running = !running; e.target.innerText = running ? "Pausar Simulación" : "Reanudar Simulación";
+            e.target.classList.toggle('bg-amber-500'); e.target.classList.toggle('bg-green-600');
+        };
+
+        // --- RESTABLECER VALORES ---
+        document.getElementById('btnRestablecer').onclick = () => {
+            document.getElementById('inpQfeed').value = 45; Q_feed = 45.0; document.getElementById('v_qfeed').innerText = '45.0 lpm';
+            
+            document.getElementById('sp1').value = 30; document.getElementById('kc1').value = -62; document.getElementById('kff1').value = 0.8;
+            document.getElementById('sp2').value = 34; document.getElementById('kc2').value = -76; document.getElementById('kff2').value = 0.8;
+            document.getElementById('sp3').value = 32; document.getElementById('kc3').value = -85; document.getElementById('kff3').value = 1.0;
+        };
+    </script>
+</body>
+</html>
